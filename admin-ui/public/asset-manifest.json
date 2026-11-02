@@ -1,0 +1,10 @@
+{
+  "source": "User supplied cloud logo (小云.png)",
+  "processing": "White matte removed; cloud cropped and resized with Lanczos",
+  "assets": {
+    "cloud-logo.png": "240 px maximum width, transparent PNG",
+    "favicon.png": "64x64 transparent PNG",
+    "favicon.ico": "16, 32, 48, 64 px ICO",
+    "apple-touch-icon.png": "180x180 PNG"
+  }
+}

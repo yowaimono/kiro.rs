@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2 } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Layers3, Activity, ShieldCheck, ChevronRight, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { storage } from '@/lib/storage'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Brand } from '@/components/brand'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { CredentialCard } from '@/components/credential-card'
@@ -537,80 +538,53 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center justify-between px-4 md:px-8">
-          <div className="flex items-center gap-2">
-            <Server className="h-5 w-5" />
-            <span className="font-semibold">Kiro Admin</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleToggleLoadBalancing}
-              disabled={isLoadingMode || isSettingMode}
-              title="切换负载均衡模式"
-            >
-              {isLoadingMode ? '加载中...' : (loadBalancingData?.mode === 'priority' ? '优先级模式' : '均衡负载')}
+      <header className="console-header">
+        <div className="console-header-inner">
+          <Brand />
+          <div className="header-actions">
+            <span className="workspace-badge"><span className="status-dot" /> 管理工作空间</span>
+            <Button variant="ghost" size="icon" onClick={toggleDarkMode} aria-label={darkMode ? '切换浅色模式' : '切换深色模式'} title={darkMode ? '切换浅色模式' : '切换深色模式'}>
+              {darkMode ? <Sun /> : <Moon />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
-              {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleRefresh}>
-              <RefreshCw className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleLogout}>
-              <LogOut className="h-5 w-5" />
-            </Button>
+            <Button variant="ghost" size="icon" onClick={handleRefresh} aria-label="刷新账号列表" title="刷新账号列表"><RefreshCw /></Button>
+            <span className="header-action-divider" />
+            <Button variant="ghost" size="icon" onClick={handleLogout} aria-label="退出登录" title="退出登录"><LogOut /></Button>
           </div>
         </div>
       </header>
-
-      {/* 主内容 */}
-      <main className="container mx-auto px-4 md:px-8 py-6">
-        {/* 统计卡片 */}
-        <div className="grid gap-4 md:grid-cols-3 mb-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                凭据总数
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data?.total || 0}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                可用凭据
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{data?.available || 0}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                当前活跃
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold flex items-center gap-2">
-                #{data?.currentId || '-'}
-                <Badge variant="success">活跃</Badge>
-              </div>
-            </CardContent>
-          </Card>
+      <main className="console-main">
+        <div className="console-breadcrumb"><span>工作空间</span><ChevronRight size={13} /><span>Kiro 账号池</span></div>
+        <div className="page-heading">
+          <div><h1>账号管理</h1><p>集中管理 Kiro 凭据，掌握账号状态与可用额度。</p></div>
+          <div className="mode-control"><span>调度策略</span>
+            <Button variant="outline" size="sm" onClick={handleToggleLoadBalancing} disabled={isLoadingMode || isSettingMode} title="切换负载均衡模式">
+              <Activity size={15} /> {isLoadingMode ? '加载中…' : loadBalancingData?.mode === 'priority' ? '优先级模式' : '均衡负载'}
+            </Button>
+          </div>
+        </div>
+        <div className="stats-grid">
+          <Card className="stat-card"><CardContent>
+            <div className="stat-label">账号总数 <span className="stat-icon"><Layers3 /></span></div>
+            <div className="stat-value">{data?.total || 0}<span>个账号</span></div>
+            <p>已添加到当前工作空间</p>
+          </CardContent></Card>
+          <Card className="stat-card"><CardContent>
+            <div className="stat-label">可用账号 <span className="stat-icon stat-icon-green"><ShieldCheck /></span></div>
+            <div className="stat-value">{data?.available || 0}<span>可参与调度</span></div>
+            <p><span className="status-dot" /> {data?.available ? '账号已就绪' : '等待添加可用凭据'}</p>
+          </CardContent></Card>
+          <Card className="stat-card"><CardContent>
+            <div className="stat-label">当前活跃 <span className="stat-icon"><Activity /></span></div>
+            <div className="stat-value">{data?.currentId ? `#${data.currentId}` : '—'}<span>{data?.currentId ? '正在使用' : '暂无活跃账号'}</span></div>
+            <p>根据调度策略自动选择</p>
+          </CardContent></Card>
         </div>
 
         {/* 凭据列表 */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
+        <section className="credentials-section">
+          <div className="credentials-toolbar">
             <div className="flex items-center gap-4">
-              <h2 className="text-xl font-semibold">凭据管理</h2>
+              <div><h2 className="section-title">账号凭据 <span>{data?.total || 0}</span></h2><p className="section-description">管理认证信息、优先级与账号额度</p></div>
               {selectedIds.size > 0 && (
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary">已选择 {selectedIds.size} 个</Badge>
@@ -620,7 +594,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="credential-toolbar-actions">
               {selectedIds.size > 0 && (
                 <>
                   <Button onClick={handleBatchVerify} size="sm" variant="outline">
@@ -684,7 +658,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               )}
               <Button onClick={() => setKamImportDialogOpen(true)} size="sm" variant="outline">
                 <FileUp className="h-4 w-4 mr-2" />
-                Kiro Account Manager 导入
+                KAM 导入
               </Button>
               <Button onClick={() => setBatchImportDialogOpen(true)} size="sm" variant="outline">
                 <Upload className="h-4 w-4 mr-2" />
@@ -697,14 +671,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
             </div>
           </div>
           {data?.credentials.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                暂无凭据
-              </CardContent>
-            </Card>
+            <div className="empty-state">
+              <div className="empty-icon"><Server size={30} strokeWidth={1.4} /></div>
+              <h3>从第一个账号开始</h3>
+              <p>添加 Kiro 凭据后，即可在这里查看账号状态、查询额度并管理调度。</p>
+              <div className="empty-actions">
+                <Button onClick={() => setAddDialogOpen(true)}><Plus size={16} /> 添加凭据</Button>
+                <Button variant="outline" onClick={() => setBatchImportDialogOpen(true)}><Upload size={16} /> 批量导入</Button>
+              </div>
+              <span className="empty-hint">支持 Social、IdC / Builder-ID / IAM 与 API Key</span>
+            </div>
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="credential-grid">
                 {currentCredentials.map((credential) => (
                   <CredentialCard
                     key={credential.id}
@@ -744,7 +723,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
               )}
             </>
           )}
-        </div>
+        </section>
+        <footer className="console-footer"><span>问高云 · Kiro 控制台</span><span>凭据由当前服务保存与管理</span></footer>
       </main>
 
       {/* 余额对话框 */}
