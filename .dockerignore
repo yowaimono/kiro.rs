@@ -51,3 +51,6 @@ credentials.json
 Dockerfile
 .dockerignore
 docker-compose*.yml
+# Managed client key hashes and atomic temporary files
+client_api_keys.json
+.client-keys-*.tmp

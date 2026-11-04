@@ -11,3 +11,6 @@
 /credentials.*
 /kiro_balance_cache.json
 /kiro_stats.json
+
+/client_api_keys.json
+/.client-keys-*.tmp

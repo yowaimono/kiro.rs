@@ -542,6 +542,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         <div className="console-header-inner">
           <Brand />
           <div className="header-actions">
+            <Button className="client-key-nav" variant="ghost" size="sm" onClick={() => { window.location.hash = 'client-keys' }}>客户端密钥</Button>
             <span className="workspace-badge"><span className="status-dot" /> 管理工作空间</span>
             <Button variant="ghost" size="icon" onClick={toggleDarkMode} aria-label={darkMode ? '切换浅色模式' : '切换深色模式'} title={darkMode ? '切换浅色模式' : '切换深色模式'}>
               {darkMode ? <Sun /> : <Moon />}

@@ -1,3 +1,4 @@
+mod client_keys;
 mod admin;
 mod admin_ui;
 mod anthropic;
@@ -83,6 +84,12 @@ async fn main() {
         std::process::exit(1);
     });
 
+    let client_key_path = std::path::Path::new(&config_path).with_file_name("client_api_keys.json");
+    let client_keys = Arc::new(client_keys::ClientKeyStore::load(client_key_path).unwrap_or_else(|error| {
+        tracing::error!("加载客户端密钥失败: {}", error);
+        std::process::exit(1);
+    }));
+
     // 构建代理配置
     let proxy_config = config.proxy_url.as_ref().map(|url| {
         let mut proxy = http_client::ProxyConfig::new(url);
@@ -162,6 +169,7 @@ async fn main() {
         &api_key,
         Some(kiro_provider),
         config.extract_thinking,
+        Some(client_keys.clone()),
     );
 
     // 构建 Admin API 路由（如果配置了非空的 admin_api_key）
@@ -179,7 +187,8 @@ async fn main() {
         } else {
             let admin_service =
                 admin::AdminService::new(token_manager.clone(), endpoint_names.clone());
-            let admin_state = admin::AdminState::new(admin_key, admin_service);
+            let admin_state = admin::AdminState::new(admin_key, admin_service)
+                .with_client_keys(client_keys.clone(), !api_key.trim().is_empty());
             let admin_app = admin::create_admin_router(admin_state);
 
             // 创建 Admin UI 路由
@@ -198,7 +207,7 @@ async fn main() {
     // 启动服务器
     let addr = format!("{}:{}", config.host, config.port);
     tracing::info!("启动 Anthropic API 端点: {}", addr);
-    tracing::info!("API Key: {}***", &api_key[..(api_key.len() / 2)]);
+    tracing::info!("客户端 API Key 认证已启用");
     tracing::info!("可用 API:");
     tracing::info!("  GET  /v1/models");
     tracing::info!("  POST /v1/messages");
