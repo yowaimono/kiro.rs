@@ -34,6 +34,9 @@ use super::{
 /// - `Authorization: Bearer <token>` header
 pub fn create_admin_router(state: AdminState) -> Router {
     Router::new()
+        .route("/client-keys", get(super::client_keys::list).post(super::client_keys::create))
+        .route("/client-keys/{id}/disabled", post(super::client_keys::set_disabled))
+        .route("/client-keys/{id}", delete(super::client_keys::delete))
         .route(
             "/credentials",
             get(get_all_credentials).post(add_credential),

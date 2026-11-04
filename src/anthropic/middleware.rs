@@ -20,6 +20,7 @@ use super::types::ErrorResponse;
 pub struct AppState {
     /// API 密钥
     pub api_key: String,
+    pub client_keys: Option<Arc<crate::client_keys::ClientKeyStore>>,
     /// Kiro Provider（可选，用于实际 API 调用）
     /// 内部使用 MultiTokenManager，已支持线程安全的多凭据管理
     pub kiro_provider: Option<Arc<KiroProvider>>,
@@ -33,6 +34,7 @@ impl AppState {
     pub fn new(api_key: impl Into<String>, extract_thinking: bool) -> Self {
         Self {
             api_key: api_key.into(),
+            client_keys: None,
             kiro_provider: None,
             extract_thinking,
             cache_tracker: None,
@@ -58,7 +60,8 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Response {
     match auth::extract_api_key(&request) {
-        Some(key) if auth::constant_time_eq(&key, &state.api_key) => next.run(request).await,
+        Some(key) if (!state.api_key.trim().is_empty() && auth::constant_time_eq(&key, &state.api_key))
+            || state.client_keys.as_ref().is_some_and(|store| store.accepts(&key)) => next.run(request).await,
         _ => {
             let error = ErrorResponse::authentication_error();
             (StatusCode::UNAUTHORIZED, Json(error)).into_response()

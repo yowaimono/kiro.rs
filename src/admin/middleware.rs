@@ -21,13 +21,22 @@ pub struct AdminState {
     pub admin_api_key: String,
     /// Admin 服务
     pub service: Arc<AdminService>,
+    pub client_keys: Option<Arc<crate::client_keys::ClientKeyStore>>,
+    pub legacy_client_key_enabled: bool,
 }
 
 impl AdminState {
+    pub fn with_client_keys(mut self, store: Arc<crate::client_keys::ClientKeyStore>, legacy_enabled: bool) -> Self {
+        self.client_keys = Some(store);
+        self.legacy_client_key_enabled = legacy_enabled;
+        self
+    }
     pub fn new(admin_api_key: impl Into<String>, service: AdminService) -> Self {
         Self {
             admin_api_key: admin_api_key.into(),
             service: Arc::new(service),
+            client_keys: None,
+            legacy_client_key_enabled: false,
         }
     }
 }
