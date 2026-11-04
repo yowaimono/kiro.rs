@@ -25,6 +25,7 @@ pub struct AppState {
     pub kiro_provider: Option<Arc<KiroProvider>>,
     /// 是否开启非流式响应的 thinking 块提取
     pub extract_thinking: bool,
+    pub cache_tracker: Option<Arc<super::cache_tracker::CacheTracker>>,
 }
 
 impl AppState {
@@ -34,11 +35,17 @@ impl AppState {
             api_key: api_key.into(),
             kiro_provider: None,
             extract_thinking,
+            cache_tracker: None,
         }
     }
 
     /// 设置 KiroProvider
     pub fn with_kiro_provider(mut self, provider: KiroProvider) -> Self {
+        let (enabled, ttl) = provider.prompt_cache_options();
+        if enabled {
+            self.cache_tracker = Some(Arc::new(super::cache_tracker::CacheTracker::new(std::time::Duration::from_secs(ttl))));
+            tracing::warn!(ttl, "Local ESTIMATED prompt-cache accounting enabled; this changes downstream billing, not Kiro charges");
+        }
         self.kiro_provider = Some(Arc::new(provider));
         self
     }

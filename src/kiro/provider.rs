@@ -30,6 +30,9 @@ const MAX_TOTAL_RETRIES: usize = 9;
 /// 核心组件，负责与 Kiro API 通信
 /// 支持多凭据故障转移和重试机制
 /// 按凭据 `endpoint` 字段选择 [`KiroEndpoint`] 实现
+#[derive(Clone, Copy)]
+pub(crate) struct UsedCredential(pub u64);
+
 pub struct KiroProvider {
     token_manager: Arc<MultiTokenManager>,
     /// 全局代理配置（用于凭据无自定义代理时的回退）
@@ -79,6 +82,11 @@ impl KiroProvider {
             endpoints,
             default_endpoint,
         }
+    }
+
+    pub(crate) fn prompt_cache_options(&self) -> (bool, u64) {
+        let config = self.token_manager.config();
+        (config.prompt_cache_accounting_enabled, config.prompt_cache_ttl_seconds.clamp(1, 3600))
     }
 
     /// 根据凭据的代理配置获取（或创建并缓存）对应的 reqwest::Client
@@ -330,7 +338,7 @@ impl KiroProvider {
                 .header("Connection", "close");
             let request = endpoint.decorate_api(base, &rctx);
 
-            let response = match request.send().await {
+            let mut response = match request.send().await {
                 Ok(resp) => resp,
                 Err(e) => {
                     tracing::warn!(
@@ -354,6 +362,7 @@ impl KiroProvider {
             // 成功响应
             if status.is_success() {
                 self.token_manager.report_success(ctx.id);
+                response.extensions_mut().insert(UsedCredential(ctx.id));
                 return Ok(response);
             }
 

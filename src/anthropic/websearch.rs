@@ -564,6 +564,7 @@ mod tests {
             stream: true,
             system: None,
             tools: Some(vec![Tool {
+                cache_control: None,
                 tool_type: Some("web_search_20250305".to_string()),
                 name: "web_search".to_string(),
                 description: String::new(),
@@ -594,6 +595,7 @@ mod tests {
             system: None,
             tools: Some(vec![
                 Tool {
+                    cache_control: None,
                     tool_type: Some("web_search_20250305".to_string()),
                     name: "web_search".to_string(),
                     description: String::new(),
@@ -601,6 +603,7 @@ mod tests {
                     max_uses: Some(8),
                 },
                 Tool {
+                    cache_control: None,
                     tool_type: None,
                     name: "other_tool".to_string(),
                     description: "Other tool".to_string(),

@@ -3,6 +3,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Client cache hints retained for local accounting, not forwarded as Kiro cache guarantees.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CacheControl {
+    #[serde(rename = "type")]
+    pub cache_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<String>,
+}
+
 // === 错误响应 ===
 
 /// API 错误响应
@@ -151,6 +160,7 @@ where
         {
             Ok(Some(vec![SystemMessage {
                 text: value.to_string(),
+                cache_control: None,
             }]))
         }
 
@@ -199,6 +209,8 @@ pub struct Message {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SystemMessage {
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 /// 工具定义
@@ -208,6 +220,8 @@ pub struct SystemMessage {
 /// 2. WebSearch 工具：{ type: "web_search_20250305", name: "web_search", max_uses: 8 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tool {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
     /// 工具类型，如 "web_search_20250305"（可选，仅 WebSearch 工具）
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub tool_type: Option<String>,

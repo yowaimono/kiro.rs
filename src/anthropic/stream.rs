@@ -8,6 +8,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::kiro::model::events::Event;
+use super::cache_accounting::CacheAccounting;
 
 /// 找到小于等于目标位置的最近有效UTF-8字符边界
 ///
@@ -519,6 +520,7 @@ pub struct StreamContext {
     pub message_id: String,
     /// 输入 tokens（估算值）
     pub input_tokens: i32,
+    pub(crate) cache_accounting: Option<CacheAccounting>,
     /// 从 contextUsageEvent 计算的实际输入 tokens
     pub context_input_tokens: Option<i32>,
     /// 输出 tokens 累计
@@ -558,6 +560,7 @@ impl StreamContext {
             message_id: format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")),
             input_tokens,
             context_input_tokens: None,
+            cache_accounting: None,
             output_tokens: 0,
             tool_block_indices: HashMap::new(),
             tool_name_map,
@@ -573,7 +576,7 @@ impl StreamContext {
 
     /// 生成 message_start 事件
     pub fn create_message_start_event(&self) -> serde_json::Value {
-        json!({
+        let mut event = json!({
             "type": "message_start",
             "message": {
                 "id": self.message_id,
@@ -588,7 +591,13 @@ impl StreamContext {
                     "output_tokens": 1
                 }
             }
-        })
+        });
+        if let Some(cache) = &self.cache_accounting { cache.apply(&mut event["message"]["usage"], self.input_tokens); }
+        event
+    }
+
+    pub fn fail_cache(&mut self) {
+        if let Some(cache) = self.cache_accounting.as_mut() { cache.fail(); }
     }
 
     /// 生成初始事件序列 (message_start + 文本块 start)
@@ -632,6 +641,7 @@ impl StreamContext {
 
     /// 处理 Kiro 事件并转换为 Anthropic SSE 事件
     pub fn process_kiro_event(&mut self, event: &Event) -> Vec<SseEvent> {
+        if let Some(cache) = self.cache_accounting.as_mut() { cache.observe(event); }
         match event {
             Event::AssistantResponse(resp) => self.process_assistant_response(&resp.content),
             Event::ToolUse(tool_use) => self.process_tool_use(tool_use),
@@ -1125,6 +1135,12 @@ impl StreamContext {
             self.state_manager
                 .generate_final_events(final_input_tokens, self.output_tokens),
         );
+        if let Some(cache) = self.cache_accounting.as_mut() {
+            for event in &mut events {
+                if event.event == "message_delta" { cache.apply(&mut event.data["usage"], final_input_tokens); }
+            }
+            cache.commit();
+        }
         events
     }
 }
@@ -1151,6 +1167,8 @@ pub struct BufferedStreamContext {
 }
 
 impl BufferedStreamContext {
+    pub fn set_cache_accounting(&mut self, cache: Option<CacheAccounting>) { self.inner.cache_accounting = cache; }
+    pub fn fail_cache(&mut self) { self.inner.fail_cache(); }
     /// 创建缓冲流上下文
     pub fn new(
         model: impl Into<String>,
@@ -1214,6 +1232,7 @@ impl BufferedStreamContext {
                 if let Some(message) = event.data.get_mut("message") {
                     if let Some(usage) = message.get_mut("usage") {
                         usage["input_tokens"] = serde_json::json!(final_input_tokens);
+                        if let Some(cache) = &self.inner.cache_accounting { cache.apply(usage, final_input_tokens); }
                     }
                 }
             }

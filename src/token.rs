@@ -243,3 +243,28 @@ pub(crate) fn estimate_output_tokens(content: &[serde_json::Value]) -> i32 {
 
     total.max(1)
 }
+
+/// Estimate cacheable blocks with the same tokenizer as ordinary input.
+pub(crate) fn count_system_message_tokens(message: &SystemMessage) -> u64 {
+    count_tokens(&message.text)
+}
+pub(crate) fn count_tool_definition_tokens(tool: &Tool) -> u64 {
+    count_tokens(&tool.name) + count_tokens(&tool.description)
+        + count_tokens(&serde_json::to_string(&tool.input_schema).unwrap_or_default())
+}
+pub(crate) fn count_message_content_tokens(value: &serde_json::Value) -> u64 {
+    match value {
+        serde_json::Value::String(text) => count_tokens(text),
+        serde_json::Value::Array(items) => items.iter().map(count_message_content_tokens).sum(),
+        serde_json::Value::Object(obj) => {
+            if let Some(text) = obj.get("text").or_else(|| obj.get("thinking")).and_then(|v| v.as_str()) {
+                count_tokens(text)
+            } else if let Some(input) = obj.get("input") {
+                count_tokens(&input.to_string())
+            } else if let Some(content) = obj.get("content") {
+                count_message_content_tokens(content)
+            } else { 0 }
+        }
+        _ => 0,
+    }
+}

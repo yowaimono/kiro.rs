@@ -98,6 +98,12 @@ pub struct Config {
     #[serde(default = "default_extract_thinking")]
     pub extract_thinking: bool,
 
+    /// Opt-in local estimated prompt-cache accounting. Never upstream-reported tokens.
+    #[serde(default)]
+    pub prompt_cache_accounting_enabled: bool,
+    #[serde(default = "default_prompt_cache_ttl")]
+    pub prompt_cache_ttl_seconds: u64,
+
     /// 默认端点名称（凭据未显式指定 endpoint 时使用，默认 "ide"）
     #[serde(default = "default_endpoint")]
     pub default_endpoint: String,
@@ -113,6 +119,8 @@ pub struct Config {
     #[serde(skip)]
     config_path: Option<PathBuf>,
 }
+
+fn default_prompt_cache_ttl() -> u64 { 300 }
 
 fn default_host() -> String {
     "127.0.0.1".to_string()
@@ -182,6 +190,8 @@ impl Default for Config {
             admin_api_key: None,
             load_balancing_mode: default_load_balancing_mode(),
             extract_thinking: default_extract_thinking(),
+            prompt_cache_accounting_enabled: false,
+            prompt_cache_ttl_seconds: 300,
             default_endpoint: default_endpoint(),
             endpoints: HashMap::new(),
             config_path: None,
