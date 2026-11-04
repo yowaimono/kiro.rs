@@ -131,6 +131,8 @@ impl EventStreamDecoder {
     /// # Returns
     /// - `Ok(())` - 数据已添加到缓冲区
     /// - `Err(BufferOverflow)` - 缓冲区已满
+    pub fn has_pending_bytes(&self) -> bool { !self.buffer.is_empty() }
+
     pub fn feed(&mut self, data: &[u8]) -> ParseResult<()> {
         // 检查缓冲区大小限制
         let new_size = self.buffer.len() + data.len();

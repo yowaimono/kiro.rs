@@ -1,0 +1,5 @@
+FROM nginx:alpine
+# Build the frontend first: cd admin-ui && pnpm install --frozen-lockfile && pnpm build
+# Build from the repository root: docker build -f admin-ui/Dockerfile.preview -t kiro-admin:local admin-ui
+COPY dist/ /usr/share/nginx/html/admin/
+COPY nginx.preview.conf /etc/nginx/conf.d/default.conf

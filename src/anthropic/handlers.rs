@@ -21,6 +21,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
 
+use super::cache_accounting::PendingCache;
 use super::converter::{ConversionError, convert_request};
 use super::middleware::AppState;
 use super::stream::{BufferedStreamContext, SseEvent, StreamContext};
@@ -393,9 +394,9 @@ pub async fn post_messages(
     // 估算输入 tokens
     let input_tokens = token::count_all_tokens(
         payload.model.clone(),
-        payload.system,
-        payload.messages,
-        payload.tools,
+        payload.system.clone(),
+        payload.messages.clone(),
+        payload.tools.clone(),
     ) as i32;
 
     // 检查是否启用了thinking
@@ -405,6 +406,7 @@ pub async fn post_messages(
         .map(|t| t.is_enabled())
         .unwrap_or(false);
 
+    let pending_cache = state.cache_tracker.as_ref().map(|tracker| PendingCache::new(tracker.clone(), &payload, input_tokens));
     let tool_name_map = conversion_result.tool_name_map;
 
     if payload.stream {
@@ -416,12 +418,13 @@ pub async fn post_messages(
             input_tokens,
             thinking_enabled,
             tool_name_map,
+            pending_cache,
         )
         .await
     } else {
         // 非流式响应：仅在配置开启时提取 thinking 块
         let extract_thinking = state.extract_thinking && thinking_enabled;
-        handle_non_stream_request(provider, &request_body, &payload.model, input_tokens, extract_thinking, tool_name_map).await
+        handle_non_stream_request(provider, &request_body, &payload.model, input_tokens, extract_thinking, tool_name_map, pending_cache).await
     }
 }
 
@@ -433,6 +436,7 @@ async fn handle_stream_request(
     input_tokens: i32,
     thinking_enabled: bool,
     tool_name_map: std::collections::HashMap<String, String>,
+    pending_cache: Option<PendingCache>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api_stream(request_body).await {
@@ -440,8 +444,11 @@ async fn handle_stream_request(
         Err(e) => return map_provider_error(e),
     };
 
+    let cache = pending_cache.and_then(|pending| pending.resolve(&response));
     // 创建流处理上下文
     let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled, tool_name_map);
+    let cache_source = if cache.is_some() { "local-estimate" } else { "disabled" };
+    ctx.cache_accounting = cache;
 
     // 生成初始事件
     let initial_events = ctx.generate_initial_events();
@@ -455,6 +462,7 @@ async fn handle_stream_request(
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .header(header::CONNECTION, "keep-alive")
+        .header("x-kiro-cache-accounting", cache_source)
         .body(Body::from_stream(stream))
         .unwrap()
 }
@@ -498,6 +506,7 @@ fn create_sse_stream(
                         Some(Ok(chunk)) => {
                             // 解码事件
                             if let Err(e) = decoder.feed(&chunk) {
+                                ctx.fail_cache();
                                 tracing::warn!("缓冲区溢出: {}", e);
                             }
 
@@ -508,9 +517,10 @@ fn create_sse_stream(
                                         if let Ok(event) = Event::from_frame(frame) {
                                             let sse_events = ctx.process_kiro_event(&event);
                                             events.extend(sse_events);
-                                        }
+                                        } else { ctx.fail_cache(); }
                                     }
                                     Err(e) => {
+                                        ctx.fail_cache();
                                         tracing::warn!("解码事件失败: {}", e);
                                     }
                                 }
@@ -525,6 +535,7 @@ fn create_sse_stream(
                             Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval)))
                         }
                         Some(Err(e)) => {
+                            ctx.fail_cache();
                             tracing::error!("读取响应流失败: {}", e);
                             // 发送最终事件并结束
                             let final_events = ctx.generate_final_events();
@@ -535,6 +546,7 @@ fn create_sse_stream(
                             Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval)))
                         }
                         None => {
+                            if decoder.has_pending_bytes() { ctx.fail_cache(); }
                             // 流结束，发送最终事件
                             let final_events = ctx.generate_final_events();
                             let bytes: Vec<Result<Bytes, Infallible>> = final_events
@@ -569,6 +581,7 @@ async fn handle_non_stream_request(
     input_tokens: i32,
     thinking_enabled: bool,
     tool_name_map: std::collections::HashMap<String, String>,
+    pending_cache: Option<PendingCache>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api(request_body).await {
@@ -576,6 +589,7 @@ async fn handle_non_stream_request(
         Err(e) => return map_provider_error(e),
     };
 
+    let mut cache = pending_cache.and_then(|pending| pending.resolve(&response));
     // 读取响应体
     let body_bytes = match response.bytes().await {
         Ok(bytes) => bytes,
@@ -595,6 +609,7 @@ async fn handle_non_stream_request(
     // 解析事件流
     let mut decoder = EventStreamDecoder::new();
     if let Err(e) = decoder.feed(&body_bytes) {
+        if let Some(cache) = cache.as_mut() { cache.fail(); }
         tracing::warn!("缓冲区溢出: {}", e);
     }
 
@@ -613,6 +628,7 @@ async fn handle_non_stream_request(
         match result {
             Ok(frame) => {
                 if let Ok(event) = Event::from_frame(frame) {
+                    if let Some(cache) = cache.as_mut() { cache.observe(&event); }
                     match event {
                         Event::AssistantResponse(resp) => {
                             text_content.push_str(&resp.content);
@@ -679,13 +695,16 @@ async fn handle_non_stream_request(
                         }
                         _ => {}
                     }
-                }
+                } else if let Some(cache) = cache.as_mut() { cache.fail(); }
             }
             Err(e) => {
+                if let Some(cache) = cache.as_mut() { cache.fail(); }
                 tracing::warn!("解码事件失败: {}", e);
             }
         }
     }
+
+    if decoder.has_pending_bytes() { if let Some(cache) = cache.as_mut() { cache.fail(); } }
 
     // 确定 stop_reason
     if has_tool_use && stop_reason == "end_turn" {
@@ -729,7 +748,7 @@ async fn handle_non_stream_request(
     let final_input_tokens = context_input_tokens.unwrap_or(input_tokens);
 
     // 构建 Anthropic 响应
-    let response_body = json!({
+    let mut response_body = json!({
         "id": format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")),
         "type": "message",
         "role": "assistant",
@@ -743,7 +762,15 @@ async fn handle_non_stream_request(
         }
     });
 
-    (StatusCode::OK, Json(response_body)).into_response()
+    if let Some(cache) = cache.as_mut() {
+        cache.apply(&mut response_body["usage"], final_input_tokens);
+        cache.commit();
+    }
+    let mut response = (StatusCode::OK, Json(response_body)).into_response();
+    if cache.is_some() {
+        response.headers_mut().insert("x-kiro-cache-accounting", "local-estimate".parse().unwrap());
+    }
+    response
 }
 
 /// 检测模型名是否包含 "thinking" 后缀，若包含则覆写 thinking 配置
@@ -801,9 +828,9 @@ pub async fn count_tokens(
 
     let total_tokens = token::count_all_tokens(
         payload.model,
-        payload.system,
-        payload.messages,
-        payload.tools,
+        payload.system.clone(),
+        payload.messages.clone(),
+        payload.tools.clone(),
     ) as i32;
 
     Json(CountTokensResponse {
@@ -909,9 +936,9 @@ pub async fn post_messages_cc(
     // 估算输入 tokens
     let input_tokens = token::count_all_tokens(
         payload.model.clone(),
-        payload.system,
-        payload.messages,
-        payload.tools,
+        payload.system.clone(),
+        payload.messages.clone(),
+        payload.tools.clone(),
     ) as i32;
 
     // 检查是否启用了thinking
@@ -921,6 +948,7 @@ pub async fn post_messages_cc(
         .map(|t| t.is_enabled())
         .unwrap_or(false);
 
+    let pending_cache = state.cache_tracker.as_ref().map(|tracker| PendingCache::new(tracker.clone(), &payload, input_tokens));
     let tool_name_map = conversion_result.tool_name_map;
 
     if payload.stream {
@@ -932,12 +960,13 @@ pub async fn post_messages_cc(
             input_tokens,
             thinking_enabled,
             tool_name_map,
+            pending_cache,
         )
         .await
     } else {
         // 非流式响应：仅在配置开启时提取 thinking 块
         let extract_thinking = state.extract_thinking && thinking_enabled;
-        handle_non_stream_request(provider, &request_body, &payload.model, input_tokens, extract_thinking, tool_name_map).await
+        handle_non_stream_request(provider, &request_body, &payload.model, input_tokens, extract_thinking, tool_name_map, pending_cache).await
     }
 }
 
@@ -952,6 +981,7 @@ async fn handle_stream_request_buffered(
     estimated_input_tokens: i32,
     thinking_enabled: bool,
     tool_name_map: std::collections::HashMap<String, String>,
+    pending_cache: Option<PendingCache>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api_stream(request_body).await {
@@ -959,8 +989,11 @@ async fn handle_stream_request_buffered(
         Err(e) => return map_provider_error(e),
     };
 
+    let cache = pending_cache.and_then(|pending| pending.resolve(&response));
     // 创建缓冲流处理上下文
-    let ctx = BufferedStreamContext::new(model, estimated_input_tokens, thinking_enabled, tool_name_map);
+    let mut ctx = BufferedStreamContext::new(model, estimated_input_tokens, thinking_enabled, tool_name_map);
+    let cache_source = if cache.is_some() { "local-estimate" } else { "disabled" };
+    ctx.set_cache_accounting(cache);
 
     // 创建缓冲 SSE 流
     let stream = create_buffered_sse_stream(response, ctx);
@@ -971,6 +1004,7 @@ async fn handle_stream_request_buffered(
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .header(header::CONNECTION, "keep-alive")
+        .header("x-kiro-cache-accounting", cache_source)
         .body(Body::from_stream(stream))
         .unwrap()
 }
@@ -1020,7 +1054,8 @@ fn create_buffered_sse_stream(
                             Some(Ok(chunk)) => {
                                 // 解码事件
                                 if let Err(e) = decoder.feed(&chunk) {
-                                    tracing::warn!("缓冲区溢出: {}", e);
+                                    ctx.fail_cache();
+                                tracing::warn!("缓冲区溢出: {}", e);
                                 }
 
                                 for result in decoder.decode_iter() {
@@ -1029,17 +1064,19 @@ fn create_buffered_sse_stream(
                                             if let Ok(event) = Event::from_frame(frame) {
                                                 // 缓冲事件（复用 StreamContext 的处理逻辑）
                                                 ctx.process_and_buffer(&event);
-                                            }
+                                            } else { ctx.fail_cache(); }
                                         }
                                         Err(e) => {
-                                            tracing::warn!("解码事件失败: {}", e);
+                                            ctx.fail_cache();
+                                        tracing::warn!("解码事件失败: {}", e);
                                         }
                                     }
                                 }
                                 // 继续读取下一个 chunk，不发送任何数据
                             }
                             Some(Err(e)) => {
-                                tracing::error!("读取响应流失败: {}", e);
+                                ctx.fail_cache();
+                            tracing::error!("读取响应流失败: {}", e);
                                 // 发生错误，完成处理并返回所有事件
                                 let all_events = ctx.finish_and_get_all_events();
                                 let bytes: Vec<Result<Bytes, Infallible>> = all_events
@@ -1049,6 +1086,7 @@ fn create_buffered_sse_stream(
                                 return Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval)));
                             }
                             None => {
+                                if decoder.has_pending_bytes() { ctx.fail_cache(); }
                                 // 流结束，完成处理并返回所有事件（已更正 input_tokens）
                                 let all_events = ctx.finish_and_get_all_events();
                                 let bytes: Vec<Result<Bytes, Infallible>> = all_events

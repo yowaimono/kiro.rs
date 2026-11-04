@@ -1269,6 +1269,7 @@ mod tests {
             system: None,
             stream: false,
             tools: Some(vec![AnthropicTool {
+                cache_control: None,
                 name: long_tool_name.to_string(),
                 description: "A test tool".to_string(),
                 input_schema: schema,
@@ -1332,6 +1333,7 @@ mod tests {
             system: None,
             stream: false,
             tools: Some(vec![AnthropicTool {
+                cache_control: None,
                 name: long_tool_name.to_string(),
                 description: "A test tool".to_string(),
                 input_schema: schema,
